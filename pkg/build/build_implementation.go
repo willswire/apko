@@ -29,7 +29,7 @@ import (
 	"chainguard.dev/apko/pkg/lock"
 	"chainguard.dev/apko/pkg/options"
 
-	gzip "github.com/klauspost/pgzip"
+	zstd "github.com/klauspost/compress/zstd"
 	"go.opentelemetry.io/otel"
 
 	"github.com/chainguard-dev/clog"
@@ -38,7 +38,7 @@ import (
 	"github.com/sigstore/cosign/v2/pkg/oci"
 )
 
-// pgzip's default is GOMAXPROCS(0)
+// zstd's default is GOMAXPROCS(0)
 //
 // This is fine for single builds, but we will starve CPU for larger builds.
 // 8 is our max because modern laptops tend to have ~8 performance cores, and
@@ -46,7 +46,7 @@ import (
 //
 // This gives us near 100% utility on workstations, allows us to do ~8
 // concurrent builds on giant machines, and uses only 1 core on tiny machines.
-var pgzipThreads = min(runtime.GOMAXPROCS(0), 8)
+var zstdThreads = min(runtime.GOMAXPROCS(0), 8)
 
 func min(l, r int) int {
 	if l < r {
@@ -57,7 +57,7 @@ func min(l, r int) int {
 }
 
 // BuildTarball takes the fully populated working directory and saves it to
-// an OCI image layer tar.gz file.
+// an OCI image layer tar.zst file.
 func (bc *Context) BuildTarball(ctx context.Context) (string, hash.Hash, hash.Hash, int64, error) {
 	log := clog.FromContext(ctx)
 
@@ -89,18 +89,18 @@ func (bc *Context) BuildTarball(ctx context.Context) (string, hash.Hash, hash.Ha
 	digest := sha256.New()
 
 	buf := bufio.NewWriterSize(outfile, 1<<22)
-	gzw := gzip.NewWriter(io.MultiWriter(digest, buf))
-	if err := gzw.SetConcurrency(1<<20, pgzipThreads); err != nil {
-		return "", nil, nil, 0, fmt.Errorf("tried to set pgzip concurrency to %d: %w", pgzipThreads, err)
+	zsw := zstd.NewWriter(io.MultiWriter(digest, buf))
+	if err := zsw.SetConcurrency(1<<20, zstdThreads); err != nil {
+		return "", nil, nil, 0, fmt.Errorf("tried to set zstd concurrency to %d: %w", zstdThreads, err)
 	}
 
 	diffid := sha256.New()
 
-	if err := tw.WriteTar(ctx, io.MultiWriter(diffid, gzw), bc.fs, bc.fs); err != nil {
+	if err := tw.WriteTar(ctx, io.MultiWriter(diffid, zsw), bc.fs, bc.fs); err != nil {
 		return "", nil, nil, 0, fmt.Errorf("failed to generate tarball for image: %w", err)
 	}
-	if err := gzw.Close(); err != nil {
-		return "", nil, nil, 0, fmt.Errorf("closing gzip writer: %w", err)
+	if err := zsw.Close(); err != nil {
+		return "", nil, nil, 0, fmt.Errorf("closing zstd writer: %w", err)
 	}
 
 	if err := buf.Flush(); err != nil {

@@ -15,7 +15,6 @@
 package build
 
 import (
-	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -36,6 +35,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
+        zstd "github.com/klauspost/compress/zstd"
 
 	"chainguard.dev/apko/pkg/baseimg"
 	"chainguard.dev/apko/pkg/build/types"
@@ -327,7 +327,7 @@ func (l *layer) Uncompressed() (io.ReadCloser, error) {
 	}
 
 	// In practice, this won't be called, but this should work anyway.
-	zr, err := gzip.NewReader(rc)
+	zr, err := zstd.NewReader(rc)
 	if err != nil {
 		return nil, err
 	}
